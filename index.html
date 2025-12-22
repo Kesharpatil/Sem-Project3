@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fake News Predictor — 3D Frontend</title>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+  <!-- OrbitControls for subtle camera movement -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/OrbitControls.js"></script>
+  
+  <style>
+    :root{
+      --bg:#0f1724; /* dark navy */
+      --card:#0b1220;
+      --accent:#7c3aed;
+      --muted:#94a3b8;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    html,body{height:100%;margin:0;}
+    body{background:linear-gradient(180deg,var(--bg),#071022);overflow:hidden;color:#e6eef8}
+
+    /* canvas fills background */
+    #bg-canvas{position:fixed;inset:0;z-index:0}
+
+    /* UI container */
+    .ui{
+      position:relative;z-index:2;max-width:1100px;margin:32px auto;padding:28px;display:grid;grid-template-columns:1fr 420px;gap:24px;align-items:start;
+    }
+
+    /* left: intro + examples */
+    .panel{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.03);padding:22px;border-radius:14px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+
+    h1{margin:0 0 8px;font-size:25px;letter-spacing:-0.2px}
+    p.lead{margin:0;color:var(--muted)}
+
+    /* card for form */
+    .form-card{padding:18px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border-radius:12px;border:1px solid rgba(255,255,255,0.025)}
+
+    label{display:block;font-size:18px;margin-bottom:6px;color:var(--muted)}
+    textarea{width:100%;min-height:140px;border-radius:8px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);color:inherit;resize:vertical;font-size:19px}
+    .row{display:flex;gap:10px;margin-top:12px}
+    .btn{background:linear-gradient(90deg,var(--accent),#3b82f6);border:none;color:white;padding:10px 14px;border-radius:10px;cursor:pointer;font-weight:600}
+    .btn:active{transform:translateY(1px)}
+
+    /* result box */
+    .result{margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);background:rgba(255,255,255,0.01)}
+    .score{font-size:22px;font-weight:700}
+
+    /* small helper */
+    .hint{font-size:16px;color:var(--muted);margin-top:8px}
+
+    /* responsive */
+    @media (max-width:980px){
+      .ui{grid-template-columns:1fr; padding:18px}
+      #bg-canvas{filter:blur(6px)}
+    }
+
+    /* animated prediction cube */
+    .preview-wrap{display:flex;align-items:center;justify-content:center;height:220px}
+    .cube-caption{margin-top:8px;text-align:center;color:var(--muted);font-size:18px}
+
+    footer{position:fixed;left:16px;right:16px;bottom:16px;z-index:3;color:var(--muted);font-size:13px;text-align:center}
+  </style>
+</head>
+<body>
+  <canvas id="bg-canvas"></canvas>
+
+  <div class="ui">
+    <div class="panel">
+      <h1>Fake News Predictor</h1>
+      <p class="lead">Paste an article or headline and the model will estimate how likely it is to be fake.</p>
+
+      <div style="height:22px"></div>
+
+      <div class="form-card">
+        <label for="article">Article text or headline</label>
+        <textarea id="article" placeholder="Paste the article or a headline here..."></textarea>
+
+        <div class="row">
+          <button id="predictBtn" class="btn">Predict</button>
+          <button id="clearBtn" class="btn" style="background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);font-weight:600">Clear</button>
+        </div>
+
+        <div id="result" class="result" aria-live="polite" hidden>
+          <div style="display:flex;align-items:center;gap:14px">
+            <div style="width:120px;">
+              <div id="preview" class="preview-wrap"></div>
+              <div class="cube-caption">Prediction confidence</div>
+            </div>
+            <div>
+              <div class="score" id="scoreText">--</div>
+              <div class="hint" id="labelText">--</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- <div class="hint">Tip: For testing from your Colab backend, change the <code>BACKEND_URL</code> variable in the script below to your endpoint.</div> -->
+      </div>
+
+      <div style="height:18px"></div>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <small class="hint"></small>
+      </div>
+    </div>
+
+    <div class="panel form-card">
+      <!-- <h3 style="margin-top:0;margin-bottom:6px">Live preview</h3>
+      <p class="hint" style="margin-top:0;margin-bottom:12px">A small WebGL cube visualises the model's confidence. It glows purple when high fake-probability and blue-green when low.</p>
+      <div id="threeContainer" style="height:360px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);display:flex;align-items:center;justify-content:center"></div> -->
+
+      <div style="height:20px"></div>
+      <div class="hint">You can also test quickly with sample headlines below.</div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn sample">Samsung, After Combustible Galaxy Note 7, Unveils New Smartphone - The New York Times</button>
+        <button class="btn sample">US Officials See No Link Between Trump and Russia</button>
+        <button class="btn sample">Re: Yes, There Are Paid Government Trolls On Social Media, Blogs, Forums And Websites</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- <footer>Made with Three.js • Replace <code>BACKEND_URL</code> before connecting to your Colab backend</footer> -->
+
+<script>
+// ---------- CONFIG ----------
+const BACKEND_URL = 'http://127.0.0.1:5000/predict'
+ // <- change this to your POST endpoint
+
+// ---------- Simple UI logic ----------
+const articleEl = document.getElementById('article')
+const predictBtn = document.getElementById('predictBtn')
+const clearBtn = document.getElementById('clearBtn')
+const resultBox = document.getElementById('result')
+const scoreText = document.getElementById('scoreText')
+const labelText = document.getElementById('labelText')
+
+predictBtn.addEventListener('click', async ()=>{
+  const text = articleEl.value.trim()
+  if(!text){alert('Please paste some text to predict');return}
+  setPredictingUI(true)
+  try{
+    // call backend
+    const resp = await fetch(BACKEND_URL, {
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})
+    })
+    if(!resp.ok) throw new Error('Bad response from backend: '+resp.status)
+    const data = await resp.json()
+    // expected {label:'fake'|'real', confidence:0-1}
+    showResult(data.label,data.confidence)
+  }catch(err){
+    alert('Prediction failed — check your backend URL and CORS.\n'+err)
+    console.error(err)
+    setPredictingUI(false)
+  }
+})
+
+clearBtn.addEventListener('click', ()=>{
+  articleEl.value=''
+  resultBox.hidden=true
+})
+
+// sample buttons
+document.querySelectorAll('.sample').forEach(b=>b.addEventListener('click',()=>{articleEl.value=b.textContent}))
+
+function setPredictingUI(active){
+  predictBtn.disabled = active
+  predictBtn.textContent = active? 'Predicting…' : 'Predict'
+}
+
+function showResult(label, confidence){
+  resultBox.hidden=false
+  const pct = Math.round(confidence*100)
+  scoreText.textContent = pct + '%'
+  labelText.textContent = label==='fake'? 'Likely fake' : 'Likely real'
+  // update 3D preview
+  updateCube(confidence, label)
+  setPredictingUI(false)
+}
+
+// ---------- Lightweight 3D 'background' with particles ----------
+const canvas = document.getElementById('bg-canvas')
+const renderer = new THREE.WebGLRenderer({canvas,antialias:true,alpha:true})
+renderer.setPixelRatio(window.devicePixelRatio)
+const scene = new THREE.Scene()
+const camera = new THREE.PerspectiveCamera(40,innerWidth/innerHeight,0.1,2000)
+camera.position.set(0,20,120)
+
+// particles
+const particleGeo = new THREE.BufferGeometry()
+const PARTICLES = 800
+const positions = new Float32Array(PARTICLES*3)
+for(let i=0;i<PARTICLES;i++){
+  positions[i*3+0] = (Math.random()-0.5)*600
+  positions[i*3+1] = (Math.random()-0.5)*200
+  positions[i*3+2] = (Math.random()-0.5)*800
+}
+particleGeo.setAttribute('position', new THREE.BufferAttribute(positions,3))
+const particleMat = new THREE.PointsMaterial({size:2.6,transparent:true,opacity:0.7})
+const particles = new THREE.Points(particleGeo,particleMat)
+scene.add(particles)
+
+// soft directional light
+const dir = new THREE.DirectionalLight(0xffffff,0.6)
+dir.position.set(50,80,40)
+scene.add(dir)
+const amb = new THREE.AmbientLight(0xffffff,0.18)
+scene.add(amb)
+
+// subtle camera motion
+let tStart = performance.now()
+function resize(){
+  renderer.setSize(innerWidth,innerHeight)
+  camera.aspect = innerWidth/innerHeight
+  camera.updateProjectionMatrix()
+}
+window.addEventListener('resize',resize)
+resize()
+
+// ---------- small preview cube (separate scene) ----------
+const previewWrap = document.getElementById('preview')
+const previewRenderer = new THREE.WebGLRenderer({antialias:true,alpha:true})
+previewRenderer.setPixelRatio(window.devicePixelRatio)
+previewRenderer.setSize(120,120)
+previewWrap.appendChild(previewRenderer.domElement)
+const pScene = new THREE.Scene()
+const pCam = new THREE.PerspectiveCamera(50,1,0.1,500)
+pCam.position.set(0,0,6)
+
+const geo = new THREE.BoxGeometry(2.2,2.2,2.2)
+const mat = new THREE.MeshStandardMaterial({metalness:0.3,roughness:0.4,emissive:0x000000})
+const cube = new THREE.Mesh(geo,mat)
+pScene.add(cube)
+const pLight = new THREE.PointLight(0xffffff,1)
+pLight.position.set(10,10,10)
+pScene.add(pLight)
+
+// function to update cube color/scale by confidence
+function updateCube(conf,label){
+  // confident fake -> purple glow, confident real -> teal/blue
+  const fakeColor = new THREE.Color(0x7c3aed)
+  const realColor = new THREE.Color(0x06b6d4)
+  const color = fakeColor.clone().lerp(realColor, conf) // mix by confidence
+  cube.material.emissive = color
+  cube.scale.setScalar(1 + 0.6*conf)
+  // rotate a bit
+  cube.userData.pulse = 0.6 + 0.9*conf
+}
+updateCube(0.3,'real') // initial
+
+// animate both scenes
+function animate(){
+  const now = performance.now()
+  const dt = (now - tStart)/1000
+  // background particles drift
+  particles.rotation.y = dt*0.02
+  particles.position.y = Math.sin(dt*0.4)*4
+
+  // camera slow orbit
+  camera.position.x = Math.sin(dt*0.08)*40
+  camera.position.z = 120 + Math.cos(dt*0.05)*20
+  camera.lookAt(0,0,0)
+
+  renderer.render(scene,camera)
+
+  // preview cube animation
+  cube.rotation.x += 0.01
+  cube.rotation.y += 0.013
+  const pulse = (1+Math.sin(now/300))/16
+  cube.scale.x += ( (cube.userData.pulse||1) - cube.scale.x ) * 0.06
+  cube.scale.y = cube.scale.z = cube.scale.x
+  previewRenderer.render(pScene,pCam)
+
+  requestAnimationFrame(animate)
+}
+requestAnimationFrame(animate)
+
+// ---------- simple interactive threejs demo on panel ----------
+// create a compact threejs scene in the right card for visual flair
+const threeContainer = document.getElementById('threeContainer')
+const rRenderer = new THREE.WebGLRenderer({antialias:true,alpha:true})
+rRenderer.setPixelRatio(window.devicePixelRatio)
+rRenderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight)
+threeContainer.appendChild(rRenderer.domElement)
+const rScene = new THREE.Scene()
+const rCam = new THREE.PerspectiveCamera(45, threeContainer.clientWidth/threeContainer.clientHeight, 0.1, 2000)
+rCam.position.set(0,0,8)
+const controls = new THREE.OrbitControls(rCam, rRenderer.domElement)
+controls.enableZoom = false
+controls.enablePan = false
+controls.autoRotate = true
+controls.autoRotateSpeed = 1.2
+
+const rLight = new THREE.PointLight(0xffffff,1)
+rLight.position.set(10,10,10)
+rScene.add(rLight)
+const rGeo = new THREE.IcosahedronGeometry(2.4,1)
+const rMat = new THREE.MeshStandardMaterial({metalness:0.5,roughness:0.35,emissive:0x081225})
+const rMesh = new THREE.Mesh(rGeo,rMat)
+rScene.add(rMesh)
+
+function rResize(){
+  rRenderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight)
+  rCam.aspect = threeContainer.clientWidth/threeContainer.clientHeight
+  rCam.updateProjectionMatrix()
+}
+new ResizeObserver(rResize).observe(threeContainer)
+
+function rAnimate(){
+  rMesh.rotation.y += 0.008
+  controls.update()
+  rRenderer.render(rScene,rCam)
+  requestAnimationFrame(rAnimate)
+}
+requestAnimationFrame(rAnimate)
+
+// ---------- helpful: simple CORS note shown to developer in console ----------
+//console.log('Fake News Predictor frontend loaded — change BACKEND_URL to your endpoint. If using Colab, expose it (eg. via ngrok) and enable CORS or use a proxy.')
+</script>
+</body>
+</html>
